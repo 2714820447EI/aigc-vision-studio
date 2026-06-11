@@ -12,6 +12,8 @@ import type {
   AgentOutput,
   ReviewResult,
 } from "@/types/creative";
+import { MOCK_NOTES } from "./mock-knowledge";
+import { getKnowledgeSources } from "./knowledge-search";
 
 // ---- 配色方案库 ----
 const COLOR_PALETTES: Record<string, ColorPalette> = {
@@ -267,35 +269,27 @@ export function generateMockResult(
     KEYWORD_POOLS[projectType] || KEYWORD_POOLS["brand-visual"];
 
   // 从 Mock 知识库中搜索相关内容作为知识来源
-  let knowledgeRefs: CreativeResult["knowledgeRefs"];
-  try {
-    const { MOCK_NOTES } = require("./mock-knowledge");
-    const { getKnowledgeSources } = require("./knowledge-search");
+  const allSources = [
+    ...getKnowledgeSources(topic, MOCK_NOTES, "strategy"),
+    ...getKnowledgeSources(visualStyle, MOCK_NOTES, "visual"),
+    ...getKnowledgeSources("prompt AI生图", MOCK_NOTES, "prompt"),
+    ...getKnowledgeSources("设计评审 美学", MOCK_NOTES, "review"),
+  ];
 
-    const allSources = [
-      ...getKnowledgeSources(topic, MOCK_NOTES, "strategy"),
-      ...getKnowledgeSources(visualStyle, MOCK_NOTES, "visual"),
-      ...getKnowledgeSources("prompt AI生图", MOCK_NOTES, "prompt"),
-      ...getKnowledgeSources("设计评审 美学", MOCK_NOTES, "review"),
-    ];
+  // 去重
+  const seen = new Set<string>();
+  const uniqueSources = allSources.filter((s) => {
+    const key = s.noteTitle;
+    if (seen.has(key)) return false;
+    seen.add(key);
+    return true;
+  });
 
-    // 去重
-    const seen = new Set<string>();
-    const uniqueSources = allSources.filter((s) => {
-      const key = s.noteTitle;
-      if (seen.has(key)) return false;
-      seen.add(key);
-      return true;
-    });
-
-    knowledgeRefs = {
-      sources: uniqueSources.slice(0, 6),
-      queryUsed: topic,
-      totalNotesScanned: MOCK_NOTES.length,
-    };
-  } catch {
-    knowledgeRefs = undefined;
-  }
+  const knowledgeRefs = {
+    sources: uniqueSources.slice(0, 6),
+    queryUsed: topic,
+    totalNotesScanned: MOCK_NOTES.length,
+  };
 
   return {
     id,

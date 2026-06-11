@@ -2,7 +2,7 @@
 
 // ============================================================
 // AIGC Vision Studio - 灵感工坊 对话式主页面
-// 集成 Obsidian 知识库：左侧栏知识检索 + 生成结果引用来源
+// 纯前端离线运行，无需网络请求
 // ============================================================
 
 import { useState, useCallback, useEffect, useRef } from "react";
@@ -10,6 +10,7 @@ import { HistoryList } from "@/components/history-list";
 import { ChatMessage } from "@/components/chat-message";
 import { ChatInput } from "@/components/chat-input";
 import { KnowledgePanel } from "@/components/knowledge-panel";
+import { generateMockResult } from "@/lib/mock-data";
 import type {
   ProjectType,
   VisualStyle,
@@ -43,26 +44,22 @@ export default function Home() {
   const [sidebarTab, setSidebarTab] = useState<"history" | "knowledge">("history");
   const messagesEndRef = useRef<HTMLDivElement>(null);
 
-  // Load history
+  // Load history from localStorage
   useEffect(() => {
-    const saved = localStorage.getItem("aigc-vision-history");
-    if (saved) {
-      try {
-        setHistory(JSON.parse(saved));
-      } catch {
-        // ignore
-      }
-    }
+    try {
+      const saved = localStorage.getItem("aigc-vision-history");
+      if (saved) setHistory(JSON.parse(saved));
+    } catch { /* ignore */ }
   }, []);
 
-  // Save history
+  // Save history to localStorage
   useEffect(() => {
     if (history.length > 0) {
       localStorage.setItem("aigc-vision-history", JSON.stringify(history));
     }
   }, [history]);
 
-  // Auto scroll
+  // Auto scroll to bottom
   useEffect(() => {
     messagesEndRef.current?.scrollIntoView({ behavior: "smooth" });
   }, [messages]);
@@ -135,56 +132,46 @@ export default function Home() {
         await new Promise((r) => setTimeout(r, 500 + Math.random() * 700));
       }
 
-      // 4. Fetch result
+      // 4. Generate result locally (no network)
       try {
-        const response = await fetch("/api/generate", {
-          method: "POST",
-          headers: { "Content-Type": "application/json" },
-          body: JSON.stringify(params),
+        const result = generateMockResult(
+          params.topic,
+          params.projectType,
+          params.visualStyle,
+          params.targetAudience
+        );
+
+        setSelectedId(result.id);
+        setHistory((prev) => [result, ...prev].slice(0, 20));
+
+        // Build knowledge source lookup by agent type
+        const sourcesByAgent = new Map<string, KnowledgeSource[]>();
+        result.knowledgeRefs?.sources.forEach((s) => {
+          const list = sourcesByAgent.get(s.usedBy) || [];
+          list.push(s);
+          sourcesByAgent.set(s.usedBy, list);
         });
-        const data = await response.json();
 
-        if (data.success && data.data) {
-          const result: CreativeResult = data.data;
-          setSelectedId(result.id);
-          setHistory((prev) => [result, ...prev].slice(0, 20));
-
-          // Build knowledge source lookup by agent type
-          const sourcesByAgent = new Map<string, KnowledgeSource[]>();
-          result.knowledgeRefs?.sources.forEach((s) => {
-            const list = sourcesByAgent.get(s.usedBy) || [];
-            list.push(s);
-            sourcesByAgent.set(s.usedBy, list);
-          });
-
-          // Update agent messages with content + knowledge sources
-          result.agentOutputs.forEach((output) => {
-            const msg = agentMsgs.find(
-              (m) => m.agentType === output.agentType
-            );
-            if (msg) {
-              updateMessage(msg.id, {
-                content: output.content,
-                cardData: output.data,
-                status: "complete",
-                resultId: result.id,
-                knowledgeSources: sourcesByAgent.get(output.agentType) || [],
-              });
-            }
-          });
-        } else {
-          agentMsgs.forEach((m) =>
-            updateMessage(m.id, {
-              content: "生成失败：" + (data.error || "未知错误"),
-              status: "complete",
-            })
+        // Update agent messages with content + knowledge sources
+        result.agentOutputs.forEach((output) => {
+          const msg = agentMsgs.find(
+            (m) => m.agentType === output.agentType
           );
-        }
+          if (msg) {
+            updateMessage(msg.id, {
+              content: output.content,
+              cardData: output.data,
+              status: "complete",
+              resultId: result.id,
+              knowledgeSources: sourcesByAgent.get(output.agentType) || [],
+            });
+          }
+        });
       } catch (error) {
         console.error("Generate error:", error);
         agentMsgs.forEach((m) =>
           updateMessage(m.id, {
-            content: "网络错误，请稍后重试",
+            content: "生成失败，请重试",
             status: "complete",
           })
         );
@@ -213,7 +200,6 @@ export default function Home() {
           },
         });
 
-        // Build knowledge source lookup
         const sourcesByAgent = new Map<string, KnowledgeSource[]>();
         item.knowledgeRefs?.sources.forEach((s) => {
           const list = sourcesByAgent.get(s.usedBy) || [];
@@ -296,30 +282,23 @@ export default function Home() {
             </button>
           )}
           <span className="text-[10px] text-zinc-600 hidden sm:inline">
-            Smart Agent Engine
+            离线模式
           </span>
         </div>
       </header>
 
       {/* ========== Body ========== */}
       <div className="flex-1 flex overflow-hidden relative">
-        {/* Sidebar overlay */}
         {sidebarOpen && (
-          <div
-            className="fixed inset-0 bg-black/60 z-30 lg:hidden"
-            onClick={() => setSidebarOpen(false)}
-          />
+          <div className="fixed inset-0 bg-black/60 z-30 lg:hidden" onClick={() => setSidebarOpen(false)} />
         )}
 
         {/* ---- Left Sidebar ---- */}
         <aside
           className={`flex-shrink-0 w-72 border-r border-zinc-800 bg-zinc-950/80 backdrop-blur-xl flex flex-col overflow-hidden transition-all duration-300 z-40 ${
-            sidebarOpen
-              ? "fixed inset-y-0 left-0 lg:relative lg:inset-auto"
-              : "hidden lg:flex"
+            sidebarOpen ? "fixed inset-y-0 left-0 lg:relative lg:inset-auto" : "hidden lg:flex"
           }`}
         >
-          {/* Mobile sidebar header */}
           <div className="h-14 flex items-center justify-between px-4 border-b border-zinc-800 lg:hidden">
             <span className="text-sm font-medium text-zinc-300">菜单</span>
             <button onClick={() => setSidebarOpen(false)} className="text-zinc-400 hover:text-zinc-200">
@@ -346,16 +325,12 @@ export default function Home() {
             ))}
           </div>
 
-          {/* Tab content */}
           {sidebarTab === "history" ? (
             <div className="flex-1 overflow-hidden flex flex-col p-4">
               <div className="flex-1 overflow-y-auto">
                 <HistoryList
                   history={history}
-                  onSelect={(item) => {
-                    handleSelectHistory(item);
-                    setSidebarOpen(false);
-                  }}
+                  onSelect={(item) => { handleSelectHistory(item); setSidebarOpen(false); }}
                   selectedId={selectedId}
                   onClear={handleClearHistory}
                 />
@@ -372,7 +347,6 @@ export default function Home() {
         <div className="flex-1 flex flex-col min-w-0">
           <div className="flex-1 overflow-y-auto">
             {messages.length === 0 ? (
-              /* Welcome */
               <div className="h-full flex flex-col items-center justify-center px-4">
                 <div className="w-16 h-16 rounded-2xl bg-gradient-to-br from-cyan-400 to-blue-500 flex items-center justify-center text-white text-2xl mb-6 shadow-lg shadow-cyan-500/20">
                   A
@@ -382,22 +356,17 @@ export default function Home() {
                   描述你的视觉创意需求，AI 智能体将结合知识库协作生成完整方案
                 </p>
                 <p className="text-[10px] text-zinc-600 mb-6">
-                  左侧可切换 📚 知识库 查看 Obsidian 笔记
+                  纯离线运行 · 无需网络 · 左侧可切换 📚 知识库
                 </p>
                 <div className="flex flex-wrap justify-center gap-2 max-w-lg">
-                  {[
+                  {([
                     { text: "为校园咖啡品牌设计年轻化视觉", pt: "brand-visual" as ProjectType, vs: "tech-futuristic" as VisualStyle, ta: "gen-z" as TargetAudience },
                     { text: "设计一套国潮风文创海报", pt: "poster-design" as ProjectType, vs: "chinese-ink" as VisualStyle, ta: "gen-z" as TargetAudience },
                     { text: "为古镇做一套文旅宣传视觉", pt: "cultural-tourism" as ProjectType, vs: "nature-organic" as VisualStyle, ta: "millennials" as TargetAudience },
-                  ].map((hint) => (
+                  ]).map((hint) => (
                     <button
                       key={hint.text}
-                      onClick={() => handleSend({
-                        topic: hint.text,
-                        projectType: hint.pt,
-                        visualStyle: hint.vs,
-                        targetAudience: hint.ta,
-                      })}
+                      onClick={() => handleSend({ topic: hint.text, projectType: hint.pt, visualStyle: hint.vs, targetAudience: hint.ta })}
                       className="px-3 py-2 text-xs rounded-xl border border-zinc-700/50 bg-zinc-800/30 text-zinc-400 hover:text-zinc-200 hover:border-zinc-600 transition-colors text-left"
                     >
                       {hint.text}
